@@ -1,0 +1,88 @@
+{
+  "name": "PseudoCodeDC",
+  "displayName": "PseudoCodeDC",
+  "description": "Coloration syntaxique et exécution de pseudo-code en français, interprété en JavaScript",
+  "version": "0.1.5",
+  "publisher": "Pseudocode",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:pseudocode",
+    "onCommand:pseudocode.run",
+    "onCommand:pseudocode.stop"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "pseudocode",
+        "aliases": ["PseudoCode", "pseudo"],
+        "extensions": [".pseudo"],
+        "configuration": "./language-configuration.json",
+        "defaultEncoding": "utf8"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "pseudocode",
+        "scopeName": "source.pseudocode",
+        "path": "./syntaxes/pseudocode.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "pseudocode.run",
+        "title": "Exécuter le pseudo-code",
+        "icon": "$(play)"
+      },
+      {
+        "command": "pseudocode.stop",
+        "title": "Arrêter l'exécution",
+        "icon": "$(debug-stop)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "when": "resourceLangId == pseudocode",
+          "command": "pseudocode.stop",
+          "group": "navigation@2"
+        },
+        {
+          "when": "resourceLangId == pseudocode",
+          "command": "pseudocode.run",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "pseudocode.run",
+        "key": "f5",
+        "when": "editorLangId == pseudocode"
+      },
+      {
+        "command": "pseudocode.stop",
+        "key": "shift+f5",
+        "when": "editorLangId == pseudocode"
+      }
+    ]
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "pretest": "npm run lint",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.96.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.0.0",
+    "eslint": "^8.56.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1"
+  }
+}

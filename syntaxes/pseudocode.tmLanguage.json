@@ -1,0 +1,36 @@
+{
+  "fileTypes": ["pseudo"],
+  "scopeName": "source.pseudocode",
+  "patterns": [
+    {
+      "name": "keyword.control.pseudo",
+      "match": "\\b(variables|variable|en|entier|chaine de caracteres|caracteres|booleen|numerique|mod)\\b|<-|&"
+    },
+    {
+      "name": "keyword.control.pseudo",
+      "match": "\\b(SI|ALORS|SINONSI|SINON|FINSI|FIN|DEBUT|ET|OU|NON|XOR|POUR SUIVANT|POUR|FINPOUR|TANTQUE|FINTANTQUE|ECRIRE|LIRE)\\b|<-|&"
+    },
+    {
+      "name": "string.quoted.double.pseudo",
+      "begin": "\"",
+      "end": "\""
+    },
+    {
+      "name": "constant.numeric.pseudo",
+      "match": "\\b\\d+\\b"
+    },
+    {
+      "name": "constant.numeric.pseudo",
+      "match": "\\b(VRAI|FAUX)\\b"
+    },
+    {
+      "name": "comment.block.pseudo",
+      "begin": "/\\*",
+      "end": "\\*/"
+    },
+    {
+      "name": "comment.line.pseudo",
+      "match": "//.*"
+    }
+  ]
+}

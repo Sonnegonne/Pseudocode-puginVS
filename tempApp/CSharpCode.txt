@@ -1,0 +1,10 @@
+static int _var_nbr, _var_double;
+static void Main() {
+    Console.WriteLine("entrez un nbr : ");
+    
+                        Console.Write("​"); 
+                        _var_nbr = (dynamic)Convert.ChangeType(Console.ReadLine(), _var_nbr.GetType());
+                        Console.WriteLine(_var_nbr);
+    _var_double = _var_nbr * 2;
+    Console.WriteLine("le double est : "  + "" +  _var_double);
+}

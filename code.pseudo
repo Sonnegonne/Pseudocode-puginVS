@@ -1,0 +1,8 @@
+variables x, y en entier
+variables z en chaine de caracteres
+DEBUT
+    z <- ""
+    ECRIRE "Veuillez entrer un nombre entre 1 et 10 : "
+    LIRE y
+    ECRIRE "Le nombre entré est : " & y
+FIN

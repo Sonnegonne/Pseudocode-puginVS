@@ -1,0 +1,10 @@
+node_modules/
+*.vsix
+.vscode-test/
+
+# Projet C# temporaire : genere a la volee dans le stockage global de
+# l'extension, jamais versionne ni embarque dans le .vsix.
+tempApp/
+bin/
+obj/
+.vs/

@@ -8,3 +8,14 @@ vsc-extension-quickstart.md
 **/*.map
 **/eslint.config.mjs
 **/.vscode-test.*
+
+# Le projet C# temporaire est desormais genere a la volee dans le stockage
+# global de l'extension : ne plus l'embarquer dans le .vsix.
+tempApp/**
+**/bin/**
+**/obj/**
+**/.vs/**
+*.vsix
+node_modules/**
+package-lock.json
+extension.js.bak

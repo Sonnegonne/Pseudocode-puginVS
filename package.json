@@ -2,10 +2,10 @@
   "name": "PseudoCodeDC",
   "displayName": "PseudoCodeDC",
   "description": "Coloration syntaxique et exécution de pseudo-code en français, interprété en JavaScript",
-  "version": "0.1.5",
+  "version": "0.3.0",
   "publisher": "Pseudocode",
   "engines": {
-    "vscode": "^1.96.0"
+    "vscode": "^1.90.0"
   },
   "categories": [
     "Programming Languages"
@@ -20,9 +20,14 @@
     "languages": [
       {
         "id": "pseudocode",
-        "aliases": ["PseudoCode", "pseudo"],
-        "extensions": [".pseudo"],
-        "configuration": "./language-configuration.json",
+        "aliases": [
+          "PseudoCode",
+          "pseudo"
+        ],
+        "extensions": [
+          ".pseudo"
+        ],
+        "configuration": "./syntaxes/language-configuration.json",
         "defaultEncoding": "utf8"
       }
     ],
@@ -70,7 +75,24 @@
         "key": "shift+f5",
         "when": "editorLangId == pseudocode"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "PseudoCode",
+      "properties": {
+        "pseudocode.targetFramework": {
+          "type": "string",
+          "default": "auto",
+          "markdownDescription": "Framework .NET cible du projet temporaire. `auto` retient la plus haute version majeure disposant a la fois d'un SDK et d'un runtime sur la machine. Indiquez sinon une valeur explicite, par exemple `net8.0`.",
+          "pattern": "^(auto|net[0-9]+\\.[0-9]+)$",
+          "patternErrorMessage": "Utilisez auto ou un moniker de la forme netX.Y (ex. net10.0)."
+        },
+        "pseudocode.dotnetPath": {
+          "type": "string",
+          "default": "dotnet",
+          "markdownDescription": "Chemin de l'executable `dotnet`. A renseigner uniquement si le SDK .NET n'est pas dans le PATH."
+        }
+      }
+    }
   },
   "scripts": {
     "lint": "eslint .",
@@ -78,7 +100,7 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.96.0",
+    "@types/vscode": "^1.90.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
     "eslint": "^8.56.0",

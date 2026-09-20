@@ -2,7 +2,7 @@
   "name": "PseudoCodeDC",
   "displayName": "PseudoCodeDC",
   "description": "Coloration syntaxique et exécution de pseudo-code en français, interprété en JavaScript",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "publisher": "Pseudocode",
   "engines": {
     "vscode": "^1.90.0"
@@ -48,6 +48,11 @@
         "command": "pseudocode.stop",
         "title": "Arrêter l'exécution",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "pseudocode.diagnosticIA",
+        "title": "Vérifier les assistants IA",
+        "category": "PseudoCode"
       }
     ],
     "menus": {
@@ -76,6 +81,18 @@
         "when": "editorLangId == pseudocode"
       }
     ],
+    "configurationDefaults": {
+      "[pseudocode]": {
+        "editor.inlineSuggest.enabled": false,
+        "editor.suggest.showWords": false,
+        "editor.wordBasedSuggestions": "off",
+        "editor.tabCompletion": "off",
+        "editor.suggestOnTriggerCharacters": false
+      },
+      "github.copilot.enable": {
+        "pseudocode": false
+      }
+    },
     "configuration": {
       "title": "PseudoCode",
       "properties": {

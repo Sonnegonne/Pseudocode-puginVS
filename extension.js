@@ -962,8 +962,158 @@ class Program {
     }
 }
 
+// --- Verrou sur les completions par IA ----------------------------------
+// L'extension contribue des valeurs par defaut qui coupent le ghost text sur
+// les fichiers .pseudo, mais un defaut contribue cede devant un reglage
+// explicite. Deux mecanismes le rendent contraignant :
+//   - le scellement, qui repose le verrou au plus haut niveau necessaire des
+//     qu'une completion redevient active sur un fichier .pseudo ;
+//   - le blocage de l'execution, qui s'appuie sur le fait que l'extension est
+//     le seul moyen d'interpreter du pseudo-code : pas de verrou, pas de F5.
+const AI_EXTENSIONS = [
+    { id: 'GitHub.copilot', label: 'GitHub Copilot' },
+    { id: 'GitHub.copilot-chat', label: 'GitHub Copilot Chat' },
+    { id: 'Codeium.codeium', label: 'Codeium' },
+    { id: 'Windsurf.windsurf', label: 'Windsurf' },
+    { id: 'TabNine.tabnine-vscode', label: 'Tabnine' },
+    { id: 'Continue.continue', label: 'Continue' },
+    { id: 'sourcegraph.cody-ai', label: 'Cody' },
+    { id: 'Supermaven.supermaven', label: 'Supermaven' },
+    { id: 'AmazonWebServices.amazon-q-vscode', label: 'Amazon Q' },
+    { id: 'Blackboxapp.blackbox', label: 'BLACKBOX AI' },
+    { id: 'VisualStudioExptTeam.vscodeintellicode', label: 'IntelliCode' }
+];
+
+class AiGuard {
+
+    constructor(context) {
+        this.sealing = false;
+        this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+        this.item.command = 'pseudocode.diagnosticIA';
+        context.subscriptions.push(
+            this.item,
+            vscode.window.onDidChangeActiveTextEditor(() => this.reseal()),
+            vscode.workspace.onDidChangeConfiguration(event => {
+                // Le drapeau evite de reagir a nos propres ecritures.
+                if (this.sealing) { return; }
+                if (event.affectsConfiguration('editor.inlineSuggest')
+                    || event.affectsConfiguration('github.copilot')) {
+                    this.reseal();
+                }
+            })
+        );
+        this.reseal();
+    }
+
+    detectExtensions() {
+        return AI_EXTENSIONS
+            .filter(candidate => vscode.extensions.getExtension(candidate.id))
+            .map(candidate => candidate.label);
+    }
+
+    // Lecture dans la portee du langage : c'est la valeur que l'editeur
+    // applique reellement au fichier .pseudo ouvert, defauts contribues inclus.
+    isInlineEnabled(document) {
+        return vscode.workspace
+            .getConfiguration('editor', document)
+            .get('inlineSuggest.enabled') === true;
+    }
+
+    audit(document) {
+        const extensions = this.detectExtensions();
+        const inline = this.isInlineEnabled(document);
+        return { extensions, inline, exposed: inline && extensions.length > 0 };
+    }
+
+    // Tant que la valeur effective est correcte, rien n'est ecrit : le cas
+    // normal, ou le defaut contribue suffit, ne touche aucun fichier de
+    // reglages. Sinon on ecrit l'override de langage a l'echelon utilisateur,
+    // puis workspace, puis dossier, en s'arretant des que le verrou tient :
+    // un reglage de portee superieure ne peut donc pas le contourner.
+    async seal(document) {
+        if (this.sealing || !document || document.languageId !== 'pseudocode') { return; }
+        if (!this.isInlineEnabled(document)) { return; }
+
+        this.sealing = true;
+        try {
+            const scopes = [vscode.ConfigurationTarget.Global];
+            if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length) {
+                scopes.push(vscode.ConfigurationTarget.Workspace, vscode.ConfigurationTarget.WorkspaceFolder);
+            }
+
+            for (const scope of scopes) {
+                try {
+                    await vscode.workspace
+                        .getConfiguration('editor', document)
+                        .update('inlineSuggest.enabled', false, scope, true);
+                } catch {
+                    continue;   // portee indisponible dans cette fenetre
+                }
+                if (!this.isInlineEnabled(document)) { break; }
+            }
+
+            try {
+                const copilot = vscode.workspace.getConfiguration('github.copilot');
+                const enable = Object.assign({}, copilot.get('enable') || {}, { pseudocode: false });
+                await copilot.update('enable', enable, vscode.ConfigurationTarget.Global);
+            } catch {
+                // Copilot n'est pas installe : son reglage n'existe pas.
+            }
+        } finally {
+            this.sealing = false;
+        }
+    }
+
+    async reseal() {
+        await this.seal(vscode.window.activeTextEditor?.document);
+        this.refresh();
+    }
+
+    refresh() {
+        const document = vscode.window.activeTextEditor?.document;
+        if (!document || document.languageId !== 'pseudocode') {
+            this.item.hide();
+            return;
+        }
+
+        const report = this.audit(document);
+        if (report.exposed) {
+            this.item.text = '$(warning) IA active';
+            this.item.tooltip = `Complétion par IA active sur ce fichier (${report.extensions.join(', ')}). `
+                + 'L\'exécution du pseudo-code est bloquée.';
+            this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+        } else {
+            this.item.text = '$(shield) Sans IA';
+            this.item.tooltip = report.extensions.length
+                ? `Complétion par IA neutralisée sur les fichiers .pseudo (détecté : ${report.extensions.join(', ')}).`
+                : 'Aucune extension de complétion par IA détectée.';
+            this.item.backgroundColor = undefined;
+        }
+        this.item.show();
+    }
+
+    // Appelee avant chaque execution. L'extension etant le seul interpreteur
+    // du pseudo-code, un refus ici est la sanction la plus concrete : l'eleve
+    // ne peut pas tester son algorithme.
+    async allowExecution(document) {
+        await this.seal(document);
+        this.refresh();
+
+        const report = this.audit(document);
+        if (!report.exposed) { return true; }
+
+        await vscode.window.showErrorMessage(
+            'Exécution bloquée : une complétion par IA reste active sur ce fichier '
+            + `(${report.extensions.join(', ')}), et le verrou n'a pas pu être rétabli. `
+            + 'Prévenez votre enseignant.',
+            { modal: true });
+        return false;
+    }
+}
+
 function activate(context) {
     const projectManager = new CSharpProjectManager(context);
+    const aiGuard = new AiGuard(context);
 
     // Préchauffage en tâche de fond : l'extension n'étant activée qu'à
     // l'ouverture d'un fichier .pseudo, le coût est engagé au bon moment.
@@ -980,6 +1130,7 @@ function activate(context) {
         }
 
         if (editor) {
+            if (!await aiGuard.allowExecution(editor.document)) { return; }
             await projectManager.execute(editor.document.getText());
         } else {
             vscode.window.showErrorMessage('Pas de pseudocode à exécuter !');
@@ -990,7 +1141,26 @@ function activate(context) {
         projectManager.stopExecution();
     });
 
-    context.subscriptions.push(runCommand, stopCommand);
+    let diagnosticCommand = vscode.commands.registerCommand('pseudocode.diagnosticIA', async () => {
+        const document = vscode.window.activeTextEditor?.document;
+        await aiGuard.seal(document);
+        aiGuard.refresh();
+
+        const report = aiGuard.audit(document);
+        const found = report.extensions.length ? report.extensions.join(', ') : 'aucune';
+
+        if (report.exposed) {
+            vscode.window.showErrorMessage(
+                `Complétion par IA toujours active (${found}) : le verrou n'a pas pu être rétabli, ` +
+                'et l\'exécution du pseudo-code restera bloquée.');
+        } else {
+            vscode.window.showInformationMessage(
+                `Verrou en place : aucune complétion par IA n'est active sur les fichiers .pseudo. ` +
+                `Extensions détectées : ${found}.`);
+        }
+    });
+
+    context.subscriptions.push(runCommand, stopCommand, diagnosticCommand);
 }
 
 function deactivate() {}

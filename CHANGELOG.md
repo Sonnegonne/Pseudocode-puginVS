@@ -2,6 +2,47 @@
 
 Toutes les évolutions notables de l'extension « PseudoCodeDC » sont consignées ici.
 
+## [0.5.0]
+
+Verrouillage des complétions par IA sur les fichiers `.pseudo`, pour que
+l'élève écrive son algorithme au lieu de valider celui d'un assistant.
+
+### Ajouté
+
+- **Des valeurs par défaut contribuées pour le langage `pseudocode`.** Sur un
+  fichier `.pseudo`, l'extension éteint `editor.inlineSuggest.enabled` — le
+  « ghost text », quel que soit le fournisseur : Copilot, Codeium, Tabnine… —
+  ainsi que les suggestions par mots, la complétion par Tab et les caractères
+  déclencheurs, et déclare `pseudocode` parmi les langages désactivés de
+  `github.copilot.enable`. Aucune manipulation n'est demandée à l'élève :
+  installer l'extension suffit. Les autres langages ne sont pas touchés.
+- **Un scellement du réglage.** Un défaut contribué cède devant un réglage
+  explicite ; l'extension surveille donc `editor.inlineSuggest` et, dès qu'une
+  complétion redevient effective sur un `.pseudo`, réécrit l'override de
+  langage à l'échelon utilisateur, puis workspace, puis dossier, en s'arrêtant
+  dès que le verrou tient. Un réglage de portée supérieure ne peut donc pas le
+  contourner. Tant que la valeur effective est correcte, aucun fichier de
+  réglages n'est touché.
+- **Le blocage de l'exécution.** L'extension étant le seul interpréteur du
+  pseudo-code, `F5` vérifie le verrou avant de compiler et refuse de lancer le
+  programme si une complétion par IA reste active. Un élève qui contourne le
+  scellement perd la possibilité de tester son algorithme ; un élève qui
+  désactive l'extension perd `F5` avec elle.
+- **Un témoin permanent dans la barre d'état**, sur les fichiers `.pseudo` :
+  « Sans IA » ou, en rouge, « IA active ». Il lit la valeur réellement
+  appliquée au fichier ouvert, et non la valeur par défaut. Il n'est plus
+  masquable.
+- **La commande « PseudoCode : Vérifier les assistants IA »**, également
+  accessible en cliquant sur le témoin : elle rescelle le réglage et rend
+  compte des extensions de complétion détectées.
+
+### Limites connues
+
+Le verrou porte sur la complétion en ligne dans les fichiers `.pseudo`. Il
+n'empêche pas de faire écrire la solution ailleurs — panneau de discussion,
+fichier d'un autre langage — puis de la coller. Pour une épreuve
+certificative, la déconnexion du compte GitHub reste la mesure de référence.
+
 ## [0.3.0]
 
 Performance : l'exécution d'un pseudo-code passe d'environ 6 secondes à moins

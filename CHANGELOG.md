@@ -2,6 +2,63 @@
 
 Toutes les évolutions notables de l'extension « PseudoCodeDC » sont consignées ici.
 
+## [0.7.1]
+
+### Corrigé
+
+- **Une variable nommée « de » cassait les déclarations en « chaine de
+  caracteres »** (traduites en « chaine _var_de caracteres »). Les
+  déclarations sont maintenant mises de côté avant l'ajout du préfixe `_var_`.
+- **Les noms de variable invalides sont refusés**, avec le numéro de ligne :
+  un nom qui commence par un chiffre (`2x`, que le préfixe `_var_` rendait
+  valide en C#), un nom accentué ou avec un symbole, une virgule en trop, et
+  les mots du langage (`SI`, `FIN`, `en`, `mod`…). `de`, `chaine`,
+  `caracteres` restent permis.
+- Un espace en trop dans « chaine  de caracteres » est refusé avec un message
+  clair (avant : erreur C# incompréhensible). Le type s'écrit exactement.
+
+## [0.7.0]
+
+### Modifié
+
+- **L'autocomplétion se limite au langage et aux variables déclarées.** Les
+  « autres mots du fichier » ne sont plus proposés. La complétion par mots de
+  VS Code (`editor.wordBasedSuggestions: off`, `showWords: false`) et les
+  snippets (`showSnippets: false`) sont coupés sur les fichiers `.pseudo`.
+  Copilot reste éteint (ghost text et IA intégrée).
+
+## [0.6.0]
+
+Retour de l'autocomplétion du langage, et verrou étendu à toute l'IA intégrée
+à VS Code.
+
+### Ajouté
+
+- **L'autocomplétion du pseudo-code.** Pendant la frappe, la liste propose les
+  variables déclarées (avec leur type), les mots-clés et les types du langage,
+  puis les autres mots déjà présents dans le fichier. Les chaînes et les
+  commentaires n'alimentent pas la liste. Aucun modèle de code n'est proposé :
+  l'élève reçoit le vocabulaire, jamais la structure de la solution.
+- **La coupure de l'IA intégrée à VS Code.** Depuis la 1.137, Copilot est livré
+  avec l'éditeur : chat, complétions, suggestions de modification, chat en
+  ligne. L'extension impose `chat.disableAIFeatures`, qui les éteint toutes,
+  et rétablit ce réglage si l'élève le modifie. Contrairement au reste du
+  verrou, ce réglage vaut pour tous les langages, pas seulement les `.pseudo`.
+
+### Changé
+
+- **Les suggestions par mots, les caractères déclencheurs et les suggestions
+  rapides sont de nouveau actifs** sur les `.pseudo`. Le ghost text
+  (`editor.inlineSuggest.enabled`) reste éteint.
+- **Une extension d'IA tierce active bloque `F5`**, même si le ghost text est
+  éteint : Tabnine ou Codeium peuvent glisser du code généré dans la liste de
+  suggestions, que l'extension a rouverte. Le message indique laquelle
+  désactiver.
+- **Le scellement ne perd plus de changement.** Un réglage modifié pendant
+  qu'un scellement est en cours est revu à la fin, au lieu d'être ignoré.
+- **Le verrou de version** (`deploiement/Verrou-PseudoCodeDC.ps1`) autorise la
+  0.6.0 et interdit aussi les extensions d'IA tierces connues.
+
 ## [0.5.0]
 
 Verrouillage des complétions par IA sur les fichiers `.pseudo`, pour que

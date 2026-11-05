@@ -4,6 +4,10 @@ Cette extension permet d'ajouter la coloration syntaxique et l'exécution de pse
 
 ## Fonctionnalités :
 - Coloration des mots-clés (SI, ALORS, etc.).
+- Autocomplétion limitée aux mots du langage (ECRIRE, LIRE, SI…, types) et aux
+  variables déjà déclarées. Rien d'autre : ni mots libres, ni modèles de code.
+- IA intégrée à VS Code désactivée (Copilot : chat, complétions, suggestions
+  de modification), et ghost text coupé sur les fichiers `.pseudo`.
 - Commande pour exécuter directement le pseudo-code.
 - Extension légère et rapide à installer.
 

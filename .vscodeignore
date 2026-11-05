@@ -19,3 +19,7 @@ tempApp/**
 node_modules/**
 package-lock.json
 extension.js.bak
+
+# Outils de deploiement sur les postes : hors du paquet.
+deploiement/**
+ETAT-DU-PROJET.md

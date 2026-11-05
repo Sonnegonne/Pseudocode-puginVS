@@ -300,8 +300,22 @@ class FastCompiler {
     }
 }
 
+// Une ligne de declaration : « variable(s) a, b en <type> ».
+const DECLARATION_LIGNE = /\bvariables?\s+(.+?)\s+en\s+(entier|chaine\s+de\s+caracteres|caracteres|numerique|booleen)\b/g;
+// Un nom valide : une lettre sans accent ou _, puis lettres, chiffres, _.
+// Les accents sont refuses : le reste du traducteur (\w) ne les reconnait pas.
+const NOM_VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// Les mots que le traducteur remplace : un nom de variable identique
+// casserait la traduction. « de », « chaine »… restent permis.
+const MOTS_RESERVES = new Set([
+    'DEBUT', 'FIN', 'variable', 'variables', 'en', 'ECRIRE', 'LIRE',
+    'SI', 'ALORS', 'SINONSI', 'SINON', 'FINSI', 'TANTQUE', 'FINTANTQUE',
+    'POUR', 'SUIVANT', 'FINPOUR', 'ET', 'OU', 'NON', 'XOR', 'mod', 'VRAI', 'FAUX'
+]);
+
 class PseudoCodeTranslator {
     static translate(pseudoCode) {
+        this.checkDeclarations(pseudoCode);
         try {
             const siCount = (pseudoCode.match(/\bSI\b/g) || []).length;
             const finsiCount = (pseudoCode.match(/\bFINSI\b/g) || []).length;
@@ -344,29 +358,31 @@ class PseudoCodeTranslator {
                 return key;
             });
     
-            // Extraire les déclarations de variables pour préfixer tous les noms de variables
-            const variableDeclarations = [];
-            pseudoCode.replace(/variables?\s+(.+?)\s+en\s+(entier|chaine\s+de\s+caracteres|caracteres|numerique|booleen)/g,
-                (_, variables, type) => {
-                    const vars = variables.split(',').map(v => v.trim());
-                    variableDeclarations.push(...vars);
-                    return '';
-                }
-            );
-            
-            // Ajouter le préfixe _var_ à toutes les variables SAUF dans les déclarations
-            // (car translateVariables s'en chargera)
+            // Les declarations sont mises de cote AVANT de prefixer les noms :
+            // sinon une variable « de » transformerait « chaine de caracteres »
+            // en « chaine _var_de caracteres ». Elles sont rendues en C# a la fin.
+            const declarations = [];
+            pseudoCode = pseudoCode.replace(DECLARATION_LIGNE, (_, variables, type) => {
+                const key = `__DECL${declarations.length}__`;
+                declarations.push({
+                    noms: variables.split(',').map(v => v.trim()),
+                    type   // forme exacte verifiee par checkDeclarations
+                });
+                return key;
+            });
+            const variableDeclarations = declarations.flatMap(d => d.noms);
+
+            // Prefixe _var_ partout ailleurs. Frontieres de mot Unicode : \b
+            // ignore les lettres accentuees (« dé » n'etait pas traduit).
             let prefixedPseudoCode = pseudoCode;
-            
-            // On remplace d'abord les variables dans le code, mais pas dans les déclarations
             if (variableDeclarations.length > 0) {
-                const variableRegex = new RegExp(`\\b(${variableDeclarations.join('|')})\\b(?!.*\\ben\\b)`, 'g');
+                // Noms deja valides (checkDeclarations) : rien a echapper.
+                const noms = variableDeclarations.join('|');
+                const variableRegex = new RegExp(`(?<![\\p{L}\\p{N}_])(${noms})(?![\\p{L}\\p{N}_])`, 'gu');
                 prefixedPseudoCode = pseudoCode.replace(variableRegex, '_var_$1');
             }
-            
-            // Traduction des variables avec préfixe dans les déclarations
-            let translated = this.translateVariables(
-                prefixedPseudoCode
+
+            let translated = prefixedPseudoCode
                     .replace(/(\w+)\s*\+\s*(.+)/g, (_, el1, el2) => `Addition(${el1}, ${el2})`)
                     .replace(/(?<![<>])=/g, '==')
                     .replace(/POUR\s+(\w+)\s*<-\s*(\w+|\d+)\s+à\s+(\w+|\d+)([\s\S]*?)POUR SUIVANT/g, 
@@ -397,8 +413,13 @@ class PseudoCodeTranslator {
                     .replace(/\bFINTANTQUE\b/g, '}')
                     .replace(/\FINPOUR\b/g, '}')
                     .replace(/\bDEBUT\b/g, 'static void Main() {')
-                    .replace(/\bFIN\b/g, '}')
-            );
+                    .replace(/\bFIN\b/g, '}');
+
+            // Les declarations reviennent en C# apres la traduction : sinon le
+            // « = "" » des chaines deviendrait « == "" ».
+            declarations.forEach((declaration, index) => {
+                translated = translated.replace(`__DECL${index}__`, this.declarationCSharp(declaration));
+            });
 
             Object.keys(tempCommentMap).forEach(key => {
                 translated = translated.replace(key, tempCommentMap[key]);
@@ -414,23 +435,47 @@ class PseudoCodeTranslator {
         }
     }
 
-    static translateVariables(code) {
-        try {
-            return code.replace(/variables?\s+(.+?)\s+en\s+(entier|chaine\s+de\s+caracteres|caracteres|numerique|booleen)/g, 
-                (_, variables, type) => {
-                    // Attention: on n'ajoute le préfixe qu'une seule fois ici
-                    const vars = variables.split(',').map(v => v.trim()).map(v => `_var_${v}`);
-                    const cType = CONFIG.typeMapping[type] || "var";
-                    if(cType == 'string'){
-                        return `static ${cType} ${vars.map(v => `${v} = ""`).join(', ')};`;
-                    }else{
-                        return `static ${cType} ${vars.join(', ')};`
-                    }
+    // Refuse, avec le numero de ligne, les noms que C# accepterait grace au
+    // prefixe _var_ mais qui ne sont pas des noms de variable valides :
+    // « 2x » deviendrait « _var_2x » et fonctionnerait.
+    static checkDeclarations(pseudoCode) {
+        // Chaines et commentaires blanchis sans changer la longueur ni les
+        // retours a la ligne : les numeros de ligne restent justes.
+        const blanc = m => m.replace(/[^\n]/g, ' ');
+        const code = pseudoCode
+            .replace(/"[^"]*"/g, blanc)
+            .replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, blanc);
+
+        for (const match of code.matchAll(DECLARATION_LIGNE)) {
+            const ligne = code.slice(0, match.index).split('\n').length;
+            // Rigueur : le type s'ecrit exactement « chaine de caracteres ».
+            if (match[2] !== match[2].replace(/\s+/g, ' ')) {
+                throw new Error(`Ligne ${ligne} : écrivez « chaine de caracteres » avec un seul espace entre les mots.`);
+            }
+            for (const nom of match[1].split(',').map(v => v.trim())) {
+                if (!nom) {
+                    throw new Error(`Ligne ${ligne} : nom de variable manquant (virgule en trop ?).`);
                 }
-            );
-        } catch (error) {
-            throw new Error(`Erreur lors de la traduction des variables: ${error.message}`);
+                if (/^\p{N}/u.test(nom)) {
+                    throw new Error(`Ligne ${ligne} : « ${nom} » n'est pas un nom de variable valide. Un nom ne peut pas commencer par un chiffre.`);
+                }
+                if (!NOM_VARIABLE.test(nom)) {
+                    throw new Error(`Ligne ${ligne} : « ${nom} » n'est pas un nom de variable valide. Utilisez seulement des lettres sans accent, des chiffres et _, sans espace, en commençant par une lettre.`);
+                }
+                if (MOTS_RESERVES.has(nom)) {
+                    throw new Error(`Ligne ${ligne} : « ${nom} » est un mot du langage, il ne peut pas servir de nom de variable.`);
+                }
+            }
         }
+    }
+
+    static declarationCSharp({ noms, type }) {
+        const vars = noms.map(v => `_var_${v}`);
+        const cType = CONFIG.typeMapping[type] || "var";
+        if (cType == 'string') {
+            return `static ${cType} ${vars.map(v => `${v} = ""`).join(', ')};`;
+        }
+        return `static ${cType} ${vars.join(', ')};`;
     }
 }
 
@@ -962,17 +1007,28 @@ class Program {
     }
 }
 
-// --- Verrou sur les completions par IA ----------------------------------
-// L'extension contribue des valeurs par defaut qui coupent le ghost text sur
-// les fichiers .pseudo, mais un defaut contribue cede devant un reglage
-// explicite. Deux mecanismes le rendent contraignant :
-//   - le scellement, qui repose le verrou au plus haut niveau necessaire des
-//     qu'une completion redevient active sur un fichier .pseudo ;
-//   - le blocage de l'execution, qui s'appuie sur le fait que l'extension est
-//     le seul moyen d'interpreter du pseudo-code : pas de verrou, pas de F5.
+// --- Verrou sur l'IA ------------------------------------------------------
+// Deux familles d'assistants a neutraliser :
+//   - l'IA integree a VS Code (Copilot est livre avec l'editeur depuis la
+//     1.137) : chat, completions, suggestions de modification, chat en ligne.
+//     Le reglage `chat.disableAIFeatures` les coupe toutes, dans tous les
+//     langages ; l'extension l'impose par defaut et le rescelle ;
+//   - les extensions tierces (Codeium, Tabnine...). Elles n'obeissent pas a ce
+//     reglage, et certaines glissent du code genere dans la liste de
+//     suggestions, que l'extension rouvre a partir de la 0.6.0. Le ghost text
+//     reste coupe sur les .pseudo, et F5 est refuse tant qu'une d'elles est
+//     active.
+// Un defaut contribue cede devant un reglage explicite : le scellement
+// repose le verrou au niveau necessaire, et le blocage de l'execution
+// s'appuie sur le fait que l'extension est le seul interpreteur du
+// pseudo-code : pas de verrou, pas de F5.
+const AI_FEATURES_SETTING = 'chat.disableAIFeatures';
+
 const AI_EXTENSIONS = [
-    { id: 'GitHub.copilot', label: 'GitHub Copilot' },
-    { id: 'GitHub.copilot-chat', label: 'GitHub Copilot Chat' },
+    // Couvertes par chat.disableAIFeatures.
+    { id: 'GitHub.copilot', label: 'GitHub Copilot', builtin: true },
+    { id: 'GitHub.copilot-chat', label: 'GitHub Copilot Chat', builtin: true },
+    // Tierces : leur seule presence suffit a bloquer l'execution.
     { id: 'Codeium.codeium', label: 'Codeium' },
     { id: 'Windsurf.windsurf', label: 'Windsurf' },
     { id: 'TabNine.tabnine-vscode', label: 'Tabnine' },
@@ -981,34 +1037,44 @@ const AI_EXTENSIONS = [
     { id: 'Supermaven.supermaven', label: 'Supermaven' },
     { id: 'AmazonWebServices.amazon-q-vscode', label: 'Amazon Q' },
     { id: 'Blackboxapp.blackbox', label: 'BLACKBOX AI' },
-    { id: 'VisualStudioExptTeam.vscodeintellicode', label: 'IntelliCode' }
+    { id: 'Google.geminicodeassist', label: 'Gemini Code Assist' },
+    { id: 'saoudrizwan.claude-dev', label: 'Cline' },
+    { id: 'RooVeterinaryInc.roo-cline', label: 'Roo Code' },
+    { id: 'Anthropic.claude-code', label: 'Claude Code' },
+    { id: 'openai.chatgpt', label: 'Codex' }
 ];
 
 class AiGuard {
 
     constructor(context) {
         this.sealing = false;
+        this.changedWhileSealing = false;
         this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
         this.item.command = 'pseudocode.diagnosticIA';
         context.subscriptions.push(
             this.item,
             vscode.window.onDidChangeActiveTextEditor(() => this.reseal()),
+            vscode.extensions.onDidChange(() => this.refresh()),
             vscode.workspace.onDidChangeConfiguration(event => {
-                // Le drapeau evite de reagir a nos propres ecritures.
-                if (this.sealing) { return; }
-                if (event.affectsConfiguration('editor.inlineSuggest')
-                    || event.affectsConfiguration('github.copilot')) {
-                    this.reseal();
+                if (!event.affectsConfiguration('editor.inlineSuggest')
+                    && !event.affectsConfiguration(AI_FEATURES_SETTING)
+                    && !event.affectsConfiguration('github.copilot')) { return; }
+                // Un scellement prend une a deux secondes : un changement
+                // survenu entre-temps, de nous ou de l'eleve, est revu a la
+                // fin. Le second passage ne trouve rien a ecrire si ce
+                // n'etaient que nos propres ecritures.
+                if (this.sealing) {
+                    this.changedWhileSealing = true;
+                    return;
                 }
+                this.reseal();
             })
         );
         this.reseal();
     }
 
     detectExtensions() {
-        return AI_EXTENSIONS
-            .filter(candidate => vscode.extensions.getExtension(candidate.id))
-            .map(candidate => candidate.label);
+        return AI_EXTENSIONS.filter(candidate => vscode.extensions.getExtension(candidate.id));
     }
 
     // Lecture dans la portee du langage : c'est la valeur que l'editeur
@@ -1019,48 +1085,81 @@ class AiGuard {
             .get('inlineSuggest.enabled') === true;
     }
 
-    audit(document) {
-        const extensions = this.detectExtensions();
-        const inline = this.isInlineEnabled(document);
-        return { extensions, inline, exposed: inline && extensions.length > 0 };
+    // Reglage de portee fenetre : il ne se lit pas dans la portee d'un fichier.
+    isBuiltinAiEnabled() {
+        return vscode.workspace.getConfiguration().get(AI_FEATURES_SETTING) !== true;
     }
 
-    // Tant que la valeur effective est correcte, rien n'est ecrit : le cas
-    // normal, ou le defaut contribue suffit, ne touche aucun fichier de
-    // reglages. Sinon on ecrit l'override de langage a l'echelon utilisateur,
-    // puis workspace, puis dossier, en s'arretant des que le verrou tient :
-    // un reglage de portee superieure ne peut donc pas le contourner.
+    audit(document) {
+        const detected = this.detectExtensions();
+        const inline = this.isInlineEnabled(document);
+        const thirdParty = detected.filter(candidate => !candidate.builtin);
+
+        const reasons = [];
+        if (this.isBuiltinAiEnabled()) {
+            reasons.push('l\'IA intégrée à VS Code est activée');
+        }
+        if (thirdParty.length) {
+            reasons.push(`extension d'IA active : ${thirdParty.map(c => c.label).join(', ')}`);
+        } else if (inline && detected.length) {
+            reasons.push('les suggestions en ligne sont réactivées');
+        }
+
+        return {
+            extensions: detected.map(candidate => candidate.label),
+            thirdParty: thirdParty.map(candidate => candidate.label),
+            reasons,
+            exposed: reasons.length > 0
+        };
+    }
+
+    // Ecrit `value` a l'echelon utilisateur, puis workspace, puis dossier, en
+    // s'arretant des que `holds()` est vrai : un reglage de portee superieure
+    // ne peut donc pas contourner le verrou. Tant que la valeur effective est
+    // deja la bonne, aucun fichier de reglages n'est touche.
+    async writeUntilHolds(section, key, value, document, holds, overrideInLanguage) {
+        if (holds()) { return; }
+        const scopes = [vscode.ConfigurationTarget.Global];
+        if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length) {
+            scopes.push(vscode.ConfigurationTarget.Workspace, vscode.ConfigurationTarget.WorkspaceFolder);
+        }
+        for (const scope of scopes) {
+            try {
+                await vscode.workspace
+                    .getConfiguration(section, document)
+                    .update(key, value, scope, overrideInLanguage);
+            } catch {
+                continue;   // portee indisponible dans cette fenetre
+            }
+            if (holds()) { return; }
+        }
+    }
+
     async seal(document) {
         if (this.sealing || !document || document.languageId !== 'pseudocode') { return; }
-        if (!this.isInlineEnabled(document)) { return; }
+        if (!this.isInlineEnabled(document) && !this.isBuiltinAiEnabled()) { return; }
 
         this.sealing = true;
         try {
-            const scopes = [vscode.ConfigurationTarget.Global];
-            if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length) {
-                scopes.push(vscode.ConfigurationTarget.Workspace, vscode.ConfigurationTarget.WorkspaceFolder);
-            }
+            await this.writeUntilHolds('editor', 'inlineSuggest.enabled', false, document,
+                () => !this.isInlineEnabled(document), true);
 
-            for (const scope of scopes) {
-                try {
-                    await vscode.workspace
-                        .getConfiguration('editor', document)
-                        .update('inlineSuggest.enabled', false, scope, true);
-                } catch {
-                    continue;   // portee indisponible dans cette fenetre
-                }
-                if (!this.isInlineEnabled(document)) { break; }
-            }
+            await this.writeUntilHolds(undefined, AI_FEATURES_SETTING, true, undefined,
+                () => !this.isBuiltinAiEnabled(), false);
 
             try {
                 const copilot = vscode.workspace.getConfiguration('github.copilot');
                 const enable = Object.assign({}, copilot.get('enable') || {}, { pseudocode: false });
                 await copilot.update('enable', enable, vscode.ConfigurationTarget.Global);
             } catch {
-                // Copilot n'est pas installe : son reglage n'existe pas.
+                // Copilot est desactive : son reglage n'existe pas.
             }
         } finally {
             this.sealing = false;
+            if (this.changedWhileSealing) {
+                this.changedWhileSealing = false;
+                setTimeout(() => this.reseal(), 0);
+            }
         }
     }
 
@@ -1079,14 +1178,13 @@ class AiGuard {
         const report = this.audit(document);
         if (report.exposed) {
             this.item.text = '$(warning) IA active';
-            this.item.tooltip = `Complétion par IA active sur ce fichier (${report.extensions.join(', ')}). `
+            this.item.tooltip = `IA active : ${report.reasons.join(' ; ')}. `
                 + 'L\'exécution du pseudo-code est bloquée.';
             this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
         } else {
             this.item.text = '$(shield) Sans IA';
-            this.item.tooltip = report.extensions.length
-                ? `Complétion par IA neutralisée sur les fichiers .pseudo (détecté : ${report.extensions.join(', ')}).`
-                : 'Aucune extension de complétion par IA détectée.';
+            this.item.tooltip = 'IA intégrée à VS Code désactivée. Les suggestions proposées '
+                + 'viennent uniquement du langage et des variables déclarées.';
             this.item.backgroundColor = undefined;
         }
         this.item.show();
@@ -1102,12 +1200,91 @@ class AiGuard {
         const report = this.audit(document);
         if (!report.exposed) { return true; }
 
+        const remedy = report.thirdParty.length
+            ? ` Désactivez ${report.thirdParty.join(', ')} (Extensions > Désactiver), puis relancez.`
+            : ' Prévenez votre enseignant.';
         await vscode.window.showErrorMessage(
-            'Exécution bloquée : une complétion par IA reste active sur ce fichier '
-            + `(${report.extensions.join(', ')}), et le verrou n'a pas pu être rétabli. `
-            + 'Prévenez votre enseignant.',
+            `Exécution bloquée : ${report.reasons.join(' ; ')}.${remedy}`,
             { modal: true });
         return false;
+    }
+}
+
+// --- Completion du langage -------------------------------------------------
+// Seules deux sources : les variables declarees dans le fichier (avec leur
+// type) et les mots du langage (mots-cles, types). Rien d'autre : ni mots
+// libres du fichier, ni modele de code, ni IA. Les reglages contribues
+// (package.json) coupent la completion par mots et les snippets de VS Code.
+const PSEUDO_KEYWORDS = [
+    ['DEBUT', 'Début du programme'],
+    ['FIN', 'Fin du programme'],
+    ['variables', 'Déclaration : variables a, b en entier'],
+    ['variable', 'Déclaration : variable a en entier'],
+    ['en', 'Déclaration : … en <type>'],
+    ['ECRIRE', 'Affiche une valeur'],
+    ['LIRE', 'Lit une valeur au clavier'],
+    ['SI', 'SI <condition> ALORS'],
+    ['ALORS', 'SI <condition> ALORS'],
+    ['SINONSI', 'SINONSI <condition> ALORS'],
+    ['SINON', 'Branche sinon'],
+    ['FINSI', 'Ferme le SI'],
+    ['TANTQUE', 'TANTQUE <condition>'],
+    ['FINTANTQUE', 'Ferme le TANTQUE'],
+    ['POUR', 'POUR i <- début à fin'],
+    ['à', 'POUR i <- début à fin'],
+    ['POUR SUIVANT', 'Fin du corps de la boucle POUR'],
+    ['FINPOUR', 'Ferme le POUR'],
+    ['ET', 'Opérateur logique'],
+    ['OU', 'Opérateur logique'],
+    ['NON', 'Opérateur logique'],
+    ['XOR', 'Opérateur logique'],
+    ['mod', 'Reste de la division entière'],
+    ['VRAI', 'Booléen'],
+    ['FAUX', 'Booléen']
+];
+const PSEUDO_TYPES = ['entier', 'numerique', 'booleen', 'caracteres', 'chaine de caracteres'];
+const DECLARATION = /\bvariables?\s+(.+?)\s+en\s+(entier|chaine\s+de\s+caracteres|caracteres|numerique|booleen)\b/g;
+
+class PseudoCompletionProvider {
+
+    provideCompletionItems(document, position) {
+        const before = document.lineAt(position.line).text.slice(0, position.character);
+        // Rien dans une chaine ni dans un commentaire de ligne.
+        if ((before.match(/"/g) || []).length % 2 === 1 || before.includes('//')) { return undefined; }
+
+        // Le texte sans chaines ni commentaires : une declaration en
+        // commentaire ne compte pas.
+        const code = document.getText()
+            .replace(/\/\*[\s\S]*?\*\//g, ' ')
+            .replace(/\/\/[^\n]*/g, ' ')
+            .replace(/"[^"\n]*"/g, ' ');
+
+        const items = [];
+        const seen = new Set();
+        const add = (label, kind, detail, rank) => {
+            if (seen.has(label)) { return; }
+            seen.add(label);
+            const item = new vscode.CompletionItem(label, kind);
+            item.detail = detail;
+            item.sortText = `${rank}_${label.toLowerCase()}`;
+            items.push(item);
+        };
+
+        for (const match of code.matchAll(DECLARATION)) {
+            const type = match[2].replace(/\s+/g, ' ');
+            // Un nom refuse a l'execution (« 2x », « SI »…) n'est pas propose.
+            for (const name of match[1].split(',').map(n => n.trim())
+                .filter(n => NOM_VARIABLE.test(n) && !MOTS_RESERVES.has(n))) {
+                add(name, vscode.CompletionItemKind.Variable, type, 0);
+            }
+        }
+        for (const [label, detail] of PSEUDO_KEYWORDS) {
+            add(label, vscode.CompletionItemKind.Keyword, detail, 1);
+        }
+        for (const type of PSEUDO_TYPES) {
+            add(type, vscode.CompletionItemKind.TypeParameter, 'Type de variable', 1);
+        }
+        return items;
     }
 }
 
@@ -1151,16 +1328,20 @@ function activate(context) {
 
         if (report.exposed) {
             vscode.window.showErrorMessage(
-                `Complétion par IA toujours active (${found}) : le verrou n'a pas pu être rétabli, ` +
-                'et l\'exécution du pseudo-code restera bloquée.');
+                `IA toujours active (${report.reasons.join(' ; ')}) : ` +
+                'l\'exécution du pseudo-code restera bloquée.');
         } else {
             vscode.window.showInformationMessage(
-                `Verrou en place : aucune complétion par IA n'est active sur les fichiers .pseudo. ` +
+                'Verrou en place : l\'IA intégrée à VS Code est désactivée, et aucune extension ' +
+                'd\'IA tierce n\'est active. ' +
                 `Extensions détectées : ${found}.`);
         }
     });
 
-    context.subscriptions.push(runCommand, stopCommand, diagnosticCommand);
+    const completionProvider = vscode.languages.registerCompletionItemProvider(
+        'pseudocode', new PseudoCompletionProvider());
+
+    context.subscriptions.push(runCommand, stopCommand, diagnosticCommand, completionProvider);
 }
 
 function deactivate() {}

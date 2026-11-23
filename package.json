@@ -2,7 +2,7 @@
   "name": "PseudoCodeDC",
   "displayName": "PseudoCodeDC",
   "description": "Coloration syntaxique et exécution de pseudo-code en français, interprété en JavaScript",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "publisher": "Pseudocode",
   "engines": {
     "vscode": "^1.90.0"

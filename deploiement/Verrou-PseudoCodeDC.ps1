@@ -41,7 +41,7 @@ param(
 
 # Versions de l'extension acceptées. À la sortie d'une nouvelle version,
 # l'ajouter ici et relancer le script sur les postes.
-$VersionsAutorisees = @('0.7.1')
+$VersionsAutorisees = @('0.7.2')
 if ($Versions) { $VersionsAutorisees = $Versions }
 
 $Cle    = 'HKLM:\SOFTWARE\Policies\Microsoft\VSCode'

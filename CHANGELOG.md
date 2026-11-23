@@ -2,6 +2,26 @@
 
 Toutes les évolutions notables de l'extension « PseudoCodeDC » sont consignées ici.
 
+## [0.7.2]
+
+### Corrigé
+
+- **Un mot-clé dans un commentaire ou dans un texte ne bloque plus F5.**
+  Le contrôle « Chaque SI doit être accompagné d'un FINSI » (de même
+  TANTQUE / FINTANTQUE et POUR / FINPOUR) comptait aussi les mots en
+  commentaire et entre guillemets : `// SI la note… ALORS` ou
+  `ECRIRE "TANTQUE tu peux"` faisaient refuser un programme juste, et un
+  `// FINSI` en commentaire cachait un vrai FINSI oublié.
+- **Un commentaire en fin de ligne ne casse plus la traduction.**
+  `note <- 15 // départ` donnait `note = 15 // départ;` (le `;` tombait dans le
+  commentaire) ; même chose après ECRIRE, SI, TANTQUE. Le commentaire est
+  maintenant placé en tête de la ligne traduite, sous la forme `/* */`.
+- **Un guillemet dans un commentaire n'avale plus le code qui suit.**
+  Chaînes et commentaires sont repérés en une seule passe, de gauche à droite
+  (`// tape "oui"`, ou un `"` seul, restent du commentaire ; un `//` dans un
+  texte reste du texte).
+- Un `$&` ou `$1` dans un texte affiché ou un commentaire est rendu tel quel.
+
 ## [0.7.1]
 
 ### Corrigé

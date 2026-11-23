@@ -302,6 +302,10 @@ class FastCompiler {
 
 // Une ligne de declaration : « variable(s) a, b en <type> ».
 const DECLARATION_LIGNE = /\bvariables?\s+(.+?)\s+en\s+(entier|chaine\s+de\s+caracteres|caracteres|numerique|booleen)\b/g;
+// Une chaine ou un commentaire, cherches en UNE seule passe de gauche a droite :
+// ce qui commence en premier l'emporte. Un " dans un commentaire reste du
+// commentaire, un // dans une chaine reste du texte.
+const CHAINE_OU_COMMENTAIRE = /"[^"]*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g;
 // Un nom valide : une lettre sans accent ou _, puis lettres, chiffres, _.
 // Les accents sont refuses : le reste du traducteur (\w) ne les reconnait pas.
 const NOM_VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -314,49 +318,71 @@ const MOTS_RESERVES = new Set([
 ]);
 
 class PseudoCodeTranslator {
+    // Le code sans ses chaines ni ses commentaires, blanchis sans changer la
+    // longueur ni les retours a la ligne : les numeros de ligne restent justes.
+    static sansChainesNiCommentaires(pseudoCode) {
+        return pseudoCode.replace(CHAINE_OU_COMMENTAIRE, m => m.replace(/[^\n]/g, ' '));
+    }
+
     static translate(pseudoCode) {
         this.checkDeclarations(pseudoCode);
         try {
-            const siCount = (pseudoCode.match(/\bSI\b/g) || []).length;
-            const finsiCount = (pseudoCode.match(/\bFINSI\b/g) || []).length;
+            // Les blocs se comptent dans le code seulement : un « SI » en
+            // commentaire ou dans un texte affiche n'ouvre aucun test.
+            const code = this.sansChainesNiCommentaires(pseudoCode);
+            const siCount = (code.match(/\bSI\b/g) || []).length;
+            const finsiCount = (code.match(/\bFINSI\b/g) || []).length;
 
             if (siCount !== finsiCount) {
                 throw new Error("Chaque SI doit être accompagné d'un FINSI");
             }
 
-            const whileCount = (pseudoCode.match(/\bTANTQUE\b/g) || []).length;
-            const whileEndCount = (pseudoCode.match(/\bFINTANTQUE\b/g) || []).length;
+            const whileCount = (code.match(/\bTANTQUE\b/g) || []).length;
+            const whileEndCount = (code.match(/\bFINTANTQUE\b/g) || []).length;
 
             if (whileCount !== whileEndCount) {
                 throw new Error("Chaque TANTQUE doit être accompagné d'un FINTANTQUE");
             }
 
-            const forCount = (pseudoCode.match(/\bPOUR\b/g) || []).length;
-            const forEndCount = (pseudoCode.match(/\bFINPOUR\b/g) || []).length;
+            const forCount = (code.match(/\bPOUR\b/g) || []).length;
+            const forEndCount = (code.match(/\bFINPOUR\b/g) || []).length;
 
             if (forCount !== forEndCount*2) {
                 throw new Error("Chaque POUR doit être accompagné d'un FINPOUR");
             }
 
+            // Chaines et commentaires mis de cote en une seule passe (avant :
+            // les chaines d'abord, si bien qu'un " dans un commentaire avalait
+            // le code jusqu'au guillemet suivant, laisse non traduit).
             let tempStringMap = {};
             let stringIndex = 0;
-    
-            pseudoCode = pseudoCode.replace(/"[^"]*"/g, (match) => {
-                const key = `__STR${stringIndex}__`;
-                tempStringMap[key] = match;
-                stringIndex++;
-                return key;
-            });
-
             let tempCommentMap = {};
             let commentIndex = 0;
-            
-            pseudoCode = pseudoCode.replace(/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)/g, (match) => {
+
+            pseudoCode = pseudoCode.replace(CHAINE_OU_COMMENTAIRE, (match) => {
+                if (match.startsWith('"')) {
+                    const key = `__STR${stringIndex}__`;
+                    tempStringMap[key] = match;
+                    stringIndex++;
+                    return key;
+                }
                 const key = `__CMT${commentIndex}__`;
                 tempCommentMap[key] = match;
                 commentIndex++;
                 return key;
             });
+
+            // Un commentaire en fin d'instruction passe en tete de ligne, sous la
+            // forme /* */ : sinon il avale ce que la traduction ajoute en fin de
+            // ligne (« note <- 15 // ... » donnait « note = 15 // ...; »).
+            pseudoCode = pseudoCode.replace(/^([ \t]*)(\S[^\n]*?)[ \t]*(__CMT\d+__)[ \t]*$/gm,
+                (_, indent, instruction, key) => {
+                    const c = tempCommentMap[key];
+                    if (c.startsWith('//')) {
+                        tempCommentMap[key] = '/*' + c.slice(2).replace(/\*\//g, '* /') + ' */';
+                    }
+                    return `${indent}${key} ${instruction}`;
+                });
     
             // Les declarations sont mises de cote AVANT de prefixer les noms :
             // sinon une variable « de » transformerait « chaine de caracteres »
@@ -421,12 +447,14 @@ class PseudoCodeTranslator {
                 translated = translated.replace(`__DECL${index}__`, this.declarationCSharp(declaration));
             });
 
+            // Remplacement par fonction : un « $& » ou « $1 » dans un texte ou un
+            // commentaire doit rester tel quel.
             Object.keys(tempCommentMap).forEach(key => {
-                translated = translated.replace(key, tempCommentMap[key]);
+                translated = translated.replace(key, () => tempCommentMap[key]);
             });
 
             Object.keys(tempStringMap).forEach(key => {
-                translated = translated.replace(key, tempStringMap[key]);
+                translated = translated.replace(key, () => tempStringMap[key]);
             });
     
             return translated;
@@ -441,10 +469,7 @@ class PseudoCodeTranslator {
     static checkDeclarations(pseudoCode) {
         // Chaines et commentaires blanchis sans changer la longueur ni les
         // retours a la ligne : les numeros de ligne restent justes.
-        const blanc = m => m.replace(/[^\n]/g, ' ');
-        const code = pseudoCode
-            .replace(/"[^"]*"/g, blanc)
-            .replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, blanc);
+        const code = this.sansChainesNiCommentaires(pseudoCode);
 
         for (const match of code.matchAll(DECLARATION_LIGNE)) {
             const ligne = code.slice(0, match.index).split('\n').length;

@@ -2,6 +2,26 @@
 
 Toutes les évolutions notables de l'extension « PseudoCodeDC » sont consignées ici.
 
+## [0.7.3]
+
+### Corrigé
+
+- **Le + respecte les priorités.** `2 * 3 + 4` donnait 14 (le plugin
+  calculait `2 * (3 + 4)`), et `a - b + c` donnait `a - (b + c)`. Le + était
+  réécrit en `Addition(mot avant, tout le reste de la ligne)` ; chaque terme
+  passe maintenant par `Nombre()` et le + reste un vrai +.
+- **On peut additionner des numerique.** `x + y` avec `x` ou `y` en numerique
+  plantait (« Une valeur non entière a été détectée dans l'addition »).
+- **Le + refuse toujours le texte**, avec un message plus clair : « Le + sert
+  seulement à additionner des nombres. Pour coller du texte, utilise & ».
+  Vaut pour `"Bonjour " + nom`, `nom + 1`, `"a" + "b"`…
+- **Un calcul après un & est fait avant d'être collé.**
+  `ECRIRE "Reste : " & a - b` ne compilait pas, et `"Total : " & a + b`
+  risquait de coller les chiffres. Chaque morceau d'un & (après `<-` ou
+  `ECRIRE`) est mis entre parenthèses.
+- **LIRE d'un numerique accepte le point** : `2.5` comme `2,5` (avant, `2.5`
+  plantait le programme). L'affichage reste avec une virgule.
+
 ## [0.7.2]
 
 ### Corrigé

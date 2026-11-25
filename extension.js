@@ -408,8 +408,15 @@ class PseudoCodeTranslator {
                 prefixedPseudoCode = pseudoCode.replace(variableRegex, '_var_$1');
             }
 
+            // 0.7.3 : le + n'est plus reecrit en Addition(mot, reste de la ligne),
+            // qui cassait les priorites (2 * 3 + 4 donnait 14) et refusait les
+            // numerique. Chaque morceau d'un & est mis entre parentheses, puis
+            // chaque terme d'un + passe par Nombre(), qui refuse le texte.
+            prefixedPseudoCode = prefixedPseudoCode.split('\n')
+                .map(ligne => this.encadrerPlus(this.parenthesesConcatenation(ligne)))
+                .join('\n');
+
             let translated = prefixedPseudoCode
-                    .replace(/(\w+)\s*\+\s*(.+)/g, (_, el1, el2) => `Addition(${el1}, ${el2})`)
                     .replace(/(?<![<>])=/g, '==')
                     .replace(/POUR\s+(\w+)\s*<-\s*(\w+|\d+)\s+à\s+(\w+|\d+)([\s\S]*?)POUR SUIVANT/g, 
                             (_, variable, debut, fin, instructions) => 
@@ -428,7 +435,7 @@ class PseudoCodeTranslator {
                     .replace(/\bECRIRE\s+(.+)/g, (_, expression) => `Console.WriteLine(${expression});`)
                     .replace(/\bLIRE\s+(\w+)/g, (_, varName) => (`
                         Console.Write("\u200B"); 
-                        ${varName} = (dynamic)Convert.ChangeType(Console.ReadLine(), ${varName}.GetType());
+                        ${varName} = (dynamic)Lire(Console.ReadLine(), ${varName}.GetType());
                         Console.WriteLine(${varName});`
                     ))
                     .replace(/\bSI\s+(.+)\s+ALORS\b/g, (_, condition) => `if(${condition}) {`)
@@ -492,6 +499,86 @@ class PseudoCodeTranslator {
                 }
             }
         }
+    }
+
+    // « ECRIRE "Total : " & a + b » : le & devient un + de C#, evalue de gauche a
+    // droite ("Total : " + a puis + b = « Total : 23 »). Chaque morceau d'un &
+    // est donc mis entre parentheses, apres <- ou ECRIRE. Les chaines sont deja
+    // remplacees par __STRn__ : un & dans un texte n'est pas vu.
+    static parenthesesConcatenation(ligne) {
+        if (!ligne.includes('&')) return ligne;
+        const cr = ligne.endsWith('\r') ? '\r' : '';
+        const corps = cr ? ligne.slice(0, -1) : ligne;
+        const m = corps.match(/^(.*?(?:<-|\bECRIRE\b))(.*)$/);
+        if (!m) return ligne;
+        const morceaux = [];
+        let profondeur = 0, courant = '';
+        for (const c of m[2]) {
+            if (c === '(') profondeur++;
+            if (c === ')') profondeur--;
+            if (c === '&' && profondeur === 0) { morceaux.push(courant); courant = ''; }
+            else courant += c;
+        }
+        morceaux.push(courant);
+        if (morceaux.length < 2) return ligne;
+        return `${m[1]} ${morceaux.map(x => `(${x.trim()})`).join(' & ')}${cr}`;
+    }
+
+    // Chaque terme d'un + (nom, nombre, texte, groupe entre parentheses,
+    // precede ou non d'un -) devient Nombre(terme) : le + reste un + de C#
+    // (priorites normales) et Nombre() refuse le texte.
+    static encadrerPlus(ligne) {
+        const MOT = /[\w.]/;
+        const debutTerme = (s, fin) => {
+            if (fin <= 0) return -1;
+            let i = fin;
+            if (s[i - 1] === ')') {
+                let p = 0;
+                for (i = fin - 1; i >= 0; i--) {
+                    if (s[i] === ')') p++;
+                    else if (s[i] === '(' && --p === 0) break;
+                }
+                if (i < 0) return -1;
+                while (i > 0 && /\w/.test(s[i - 1])) i--;   // appel : Nombre(...)
+                return i;
+            }
+            while (i > 0 && MOT.test(s[i - 1])) i--;
+            return i === fin ? -1 : i;
+        };
+        const finTerme = (s, debut) => {
+            let i = debut;
+            if (s[i] === '-') { i++; while (i < s.length && /[ \t]/.test(s[i])) i++; }
+            const finGroupe = (j) => {
+                let p = 0;
+                for (; j < s.length; j++) {
+                    if (s[j] === '(') p++;
+                    else if (s[j] === ')' && --p === 0) return j + 1;
+                }
+                return -1;
+            };
+            if (s[i] === '(') return finGroupe(i);
+            const d = i;
+            while (i < s.length && MOT.test(s[i])) i++;
+            if (i === d) return -1;
+            return s[i] === '(' ? finGroupe(i) : i;
+        };
+        let s = ligne;
+        let k = s.indexOf('+');
+        while (k !== -1) {
+            let fin = k;
+            while (fin > 0 && /[ \t]/.test(s[fin - 1])) fin--;
+            const deb = debutTerme(s, fin);
+            let d = k + 1;
+            while (d < s.length && /[ \t]/.test(s[d])) d++;
+            const f = finTerme(s, d);
+            if (deb < 0 || f < 0) { k = s.indexOf('+', k + 1); continue; }
+            const gauche = s.slice(deb, fin);
+            const g = gauche.startsWith('Nombre(') ? gauche : `Nombre(${gauche})`;
+            const morceau = `${g} + Nombre(${s.slice(d, f)})`;
+            s = s.slice(0, deb) + morceau + s.slice(f);
+            k = s.indexOf('+', deb + morceau.length);
+        }
+        return s;
     }
 
     static declarationCSharp({ noms, type }) {
@@ -970,18 +1057,22 @@ class Program {
     }
     ${translatedCode}
 
-    public static int Addition(params object[] obj)
+    // Chaque terme d'un + passe par Nombre() : entier et numerique gardent leur
+    // type (le + de C# respecte alors les priorites), le texte est refuse.
+    public static int Nombre(int valeur) => valeur;
+    public static double Nombre(double valeur) => valeur;
+    public static string Nombre(string valeur) =>
+        throw new Exception("Le + sert seulement à additionner des nombres. Pour coller du texte, utilise &.");
+
+    // LIRE : un numerique accepte la virgule (2,5) comme le point (2.5).
+    public static object Lire(string texte, Type type)
     {
-        int somme = 0;
-        foreach (var objInstance in obj)
+        if (type == typeof(double))
         {
-            if (objInstance is not int)
-            {
-                throw new Exception("Une valeur non entière a été détectée dans l'addition");
-            }
-            somme += (int)objInstance;
+            return double.Parse(texte.Trim().Replace(',', '.'),
+                System.Globalization.CultureInfo.InvariantCulture);
         }
-        return somme;
+        return Convert.ChangeType(texte, type);
     }
 }`;
     }

@@ -8,3 +8,6 @@ tempApp/
 bin/
 obj/
 .vs/
+
+# Notes internes (failles du verrou, contexte ecole) : jamais publiees.
+ETAT-DU-PROJET.md
